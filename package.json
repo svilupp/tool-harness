@@ -1,0 +1,77 @@
+{
+  "name": "tool-harness",
+  "version": "0.0.1",
+  "description": "Consolidate AI tools into 3 meta-tools with a 7-layer auto-repair pipeline",
+  "license": "MIT",
+  "author": "svilupp",
+  "module": "src/index.ts",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/ tests/",
+    "lint:fix": "biome check --write src/ tests/",
+    "oxlint": "oxlint src/ tests/",
+    "check": "bun run typecheck && bun run lint && bun run oxlint && bun test"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "ai",
+    "tools",
+    "meta-tools",
+    "repair",
+    "ai-sdk",
+    "llm",
+    "tool-calling",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/svilupp/tool-harness"
+  },
+  "homepage": "https://svilupp.github.io/tool-harness/",
+  "bugs": {
+    "url": "https://github.com/svilupp/tool-harness/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "ai": "^6.0.97",
+    "fastest-levenshtein": "^1.0.16",
+    "jsonrepair": "^3.13.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/bun": "latest",
+    "oxlint": "^1.49.0"
+  },
+  "peerDependencies": {
+    "@ai-sdk/anthropic": "^3.0.46",
+    "@ai-sdk/google": "^3.0.30",
+    "@ai-sdk/openai": "^3.0.30",
+    "typescript": "^5"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/anthropic": {
+      "optional": true
+    },
+    "@ai-sdk/google": {
+      "optional": true
+    },
+    "@ai-sdk/openai": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  }
+}

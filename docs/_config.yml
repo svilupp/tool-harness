@@ -1,0 +1,13 @@
+title: tool-harness
+description: Consolidate AI tools into 3 meta-tools with auto-repair
+theme: jekyll-theme-cayman
+baseurl: /tool-harness
+url: https://svilupp.github.io
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+exclude:
+  - llms.txt
