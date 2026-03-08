@@ -21,12 +21,6 @@ export function buildDirectTools(harness: ToolHarness) {
 			},
 		};
 
-		if (def.examples && def.examples.length > 0) {
-			toolOpts["inputExamples"] = def.examples.map(
-				(ex: Record<string, unknown>) => ({ input: ex }),
-			);
-		}
-
 		if (def.toModelOutput) {
 			toolOpts["experimental_toModelOutput"] = def.toModelOutput;
 		}

@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import type { PromptBlockOptions } from "./describe/prompt-block.ts";
 import { generatePromptBlock as genBlock } from "./describe/prompt-block.ts";
 import { toolSignature } from "./describe/signature.ts";
 import { toolDetail as genDetail } from "./describe/tool-detail.ts";
@@ -131,6 +132,8 @@ export class ToolHarness {
 			repairModel: this.config.repairModel,
 			toolName: resolved.name,
 			availableTools: this.registry.listNames(),
+			repairPolicy: this.config.repairPolicy,
+			onEvent: this.config.onEvent,
 		});
 		return result instanceof Promise ? await result : result;
 	}
@@ -140,9 +143,9 @@ export class ToolHarness {
 		return result?.data ?? null;
 	}
 
-	generatePromptBlock(): string {
+	generatePromptBlock(options?: PromptBlockOptions): string {
 		const allTools = this.registry.list();
-		return genBlock(allTools);
+		return genBlock(allTools, options);
 	}
 
 	getToolDetail(name: string): string {
@@ -213,6 +216,8 @@ export class ToolHarness {
 			repairModel: this.config.repairModel,
 			toolName,
 			availableTools: this.registry.listNames(),
+			repairPolicy: this.config.repairPolicy,
+			onEvent: this.config.onEvent,
 		});
 		const resolved = result instanceof Promise ? await result : result;
 		if (!resolved.ok) return resolved.error;
@@ -270,12 +275,6 @@ function buildHybridTools(harness: ToolHarness) {
 					});
 				},
 			};
-
-			if (def.examples && def.examples.length > 0) {
-				toolOpts["inputExamples"] = def.examples.map(
-					(ex: Record<string, unknown>) => ({ input: ex }),
-				);
-			}
 
 			if (def.toModelOutput) {
 				toolOpts["experimental_toModelOutput"] = def.toModelOutput;

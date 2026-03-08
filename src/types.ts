@@ -28,8 +28,32 @@ export interface ToolExecutionContext {
 	[key: string]: unknown;
 }
 
+export type RepairStrategy = RepairAction["strategy"];
+
+export interface RepairPolicy {
+	mode: "never" | "on_validation_failure" | "always";
+	enabledLayers?: RepairStrategy[];
+	confidenceThreshold?: number;
+}
+
+export interface HarnessEvent {
+	type:
+		| "tool_offered"
+		| "tool_called"
+		| "tool_omitted"
+		| "repair_triggered"
+		| "repair_layer_used"
+		| "repair_skipped"
+		| "execution_success"
+		| "execution_failure";
+	timestamp: number;
+	data: Record<string, unknown>;
+}
+
 export interface HarnessConfig {
 	repairModel?: LanguageModel | undefined;
+	repairPolicy?: RepairPolicy | undefined;
+	onEvent?: ((event: HarnessEvent) => void) | undefined;
 }
 
 export type RepairResult<T = Record<string, unknown>> =

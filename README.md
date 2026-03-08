@@ -8,7 +8,7 @@
 
 > **Warning**: This library is in **alpha** and highly experimental. APIs may change without notice. Use at your own risk.
 
-A lightweight TypeScript library that consolidates 20+ AI tools into 3 meta-tools with an intelligent 7-layer auto-repair pipeline. Built for [AI SDK v6](https://ai-sdk.dev).
+A lightweight TypeScript library for reliable AI tool use. Consolidates tools into meta-tools, auto-repairs malformed arguments, and reduces false negatives with structural toolChoice hints. Built for [AI SDK v6](https://ai-sdk.dev).
 
 ```typescript
 import { defineTools, createHarness } from "tool-harness";
@@ -77,7 +77,7 @@ This reduces context window usage while keeping the full tool set accessible.
 
 ### Repair pipeline
 
-Every tool call passes through a deterministic 7-layer repair pipeline before execution:
+Invalid tool arguments pass through a 7-layer repair pipeline (valid inputs are passed through unchanged):
 
 1. **JSON repair** -- Fix malformed JSON (unclosed strings, trailing commas, missing brackets)
 2. **Key normalization** -- Map `camelCase`, `snake_case`, and prefix variants to canonical schema keys
@@ -207,6 +207,25 @@ const { text } = await generateText({
 });
 ```
 
+### Reducing false negatives
+
+Models often fail to act after user confirmations ("Yes, go ahead"). Use `suggestToolChoice` to detect these turns and force tool calls:
+
+```typescript
+const toolChoice = harness.suggestToolChoice({
+  lastAssistantMessage: previousAssistantText,
+  lastUserMessage: userMessage,
+  turnNumber: turn,
+});
+
+const { text } = await generateText({
+  model: anthropic("claude-sonnet-4-20250514"),
+  tools: harness.toDirectTools(),
+  toolChoice,
+  prompt: userMessage,
+});
+```
+
 ### AI-assisted repair
 
 Enable the optional AI repair layer for complex structural fixes:
@@ -233,7 +252,8 @@ Generate token-efficient tool descriptions for system prompts:
 
 ```typescript
 // Compact prompt block for all tools
-const block = harness.generatePromptBlock();
+const block = harness.generatePromptBlock(); // grouped_with_breadth (default)
+const minimal = harness.generatePromptBlock({ style: "minimal" });
 
 // Detailed signature for a single tool
 const detail = harness.getToolDetail("readFile");
@@ -289,6 +309,8 @@ harness.unloadTools(["newTool"]);
 | `getToolDetail(name)` | `string` | Detailed description for one tool |
 | `listToolSummaries()` | `string` | One-line signatures for all tools |
 | `loadTools(defs)` | `void` | Register additional tools at runtime |
+| `suggestToolChoice(ctx)` | `"auto" \| "required"` | Structural hint for `toolChoice` -- reduces false negatives on confirmation turns |
+| `toCompiledTools(ctx, opts?)` | `CompileResult` | Turn-local tool surface from capability registry |
 | `unloadTools(names)` | `void` | Remove tools by name |
 
 For the full API reference with type signatures, see the [documentation](https://svilupp.github.io/tool-harness/).

@@ -1,6 +1,6 @@
 {
   "name": "tool-harness",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Consolidate AI tools into 3 meta-tools with a 7-layer auto-repair pipeline",
   "license": "MIT",
   "author": "svilupp",

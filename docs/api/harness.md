@@ -36,6 +36,8 @@ const harness = new ToolHarness(tools, {
 | `tools` | `ToolDefs` | Record of tool name to `ToolDef` objects |
 | `config` | `HarnessConfig` | Optional configuration |
 | `config.repairModel` | `LanguageModel` | AI model for layer-6 repair (optional) |
+| `config.repairPolicy` | `RepairPolicy` | Controls which repair layers run and when (optional) |
+| `config.onEvent` | `(event: HarnessEvent) => void` | Callback for harness lifecycle events (optional) |
 
 ---
 
@@ -120,13 +122,22 @@ const fixed = harness.repairJSON('{ path: "test.txt", }');
 
 ## Description
 
-### `generatePromptBlock()`
+### `generatePromptBlock(options?)`
 
 Generates a formatted text block describing all registered tools, suitable for inclusion in a system prompt.
 
 ```ts
 const block = harness.generatePromptBlock();
+const block = harness.generatePromptBlock({ style: "minimal" });
 ```
+
+**Parameters:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `style` | `"minimal" \| "grouped" \| "grouped_with_breadth" \| "grouped_with_examples" \| "full"` | `"grouped_with_breadth"` | Prompt block style |
+| `domainGroups` | `Record<string, string[]>` | (by category) | Custom tool groupings |
+| `breadthExamples` | `Record<string, Example[]>` | -- | Usage examples for `grouped_with_examples` and `full` styles |
 
 **Returns:** `string` -- Multi-line prompt block with tool signatures grouped by category.
 
@@ -198,6 +209,110 @@ harness.unloadTools(["newTool"]);
 
 ---
 
+## Capability-Based Compilation
+
+### `registerCapability(cap)`
+
+Registers a capability (a tool paired with activation rules and domain metadata) for use with `toCompiledTools`.
+
+```ts
+harness.registerCapability({
+  name: "addToCart",
+  domain: "commerce",
+  group: "cart",
+  tool: addToCartDef,
+  activationRules: [
+    { type: "state_match", condition: (ctx) => ctx.state === "browsing" },
+  ],
+});
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `cap` | `Capability` | Capability definition with name, domain, group, tool, and activation rules |
+
+### `toCompiledTools(context, options?)`
+
+Compiles a turn-local tool surface from registered capabilities. Evaluates activation rules against the current conversation state, sorts by priority, and returns up to `maxTools` AI SDK tools.
+
+```ts
+const { tools, metadata } = harness.toCompiledTools({
+  state: "browsing",
+  activeHandles: ["cart-123"],
+  turnNumber: 3,
+  lastToolCalled: "searchProducts",
+});
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context` | `TurnContext` | Current conversation state |
+| `options.maxTools` | `number` | Max tools to offer (default 8) |
+| `options.fallbackMode` | `"strict" \| "permissive"` | Whether to fill remaining slots from inactive capabilities (default `"strict"`) |
+| `options.provider` | `string` | Provider hint (`"openai"`, `"anthropic"`, `"google"`) |
+
+**Returns:** `CompileResult` with:
+
+- `tools` -- `Record<string, Tool>` of AI SDK tools for the current turn.
+- `metadata.offeredTools` -- Names of tools included in the surface.
+- `metadata.hiddenTools` -- Names of tools that exceeded `maxTools` and were excluded.
+- `metadata.compileMs` -- Time spent compiling, in milliseconds.
+
+---
+
+## Tool Choice
+
+### `suggestToolChoice(context)`
+
+Suggests the appropriate `toolChoice` setting for the current turn. Uses a structural signal: if the assistant's last message ended with `?` and the user gave a short reply (8 words or fewer), returns `"required"` to force a tool call. Otherwise returns `"auto"`.
+
+This addresses post-confirmation inaction, where the model asks a question, the user confirms, and the model still does not act. No keyword matching -- purely structural.
+
+```ts
+harness.suggestToolChoice({
+  lastAssistantMessage: "Would you like me to add that to your cart?",
+  lastUserMessage: "Yes, please",
+  turnNumber: 3,
+  lastToolCalled: null,
+})
+// => "required"
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `context.lastAssistantMessage` | `string?` | The assistant's previous message text |
+| `context.lastUserMessage` | `string` | The user's current message |
+| `context.turnNumber` | `number` | Current turn number (1-indexed) |
+| `context.lastToolCalled` | `string?` | Name of the last tool that was called |
+
+**Returns:** `"auto" | "required"`
+
+**Usage with AI SDK:**
+
+```ts
+const toolChoice = harness.suggestToolChoice({
+  lastAssistantMessage: messages.at(-2)?.content,
+  lastUserMessage: userMessage,
+  turnNumber,
+  lastToolCalled,
+});
+
+const { text } = await generateText({
+  model,
+  tools: harness.toDirectTools(),
+  toolChoice,
+  prompt: userMessage,
+});
+```
+
+---
+
 ## AI SDK Integration
 
 ### `toMetaTools()`
@@ -261,3 +376,25 @@ const { text } = await generateText({
 - **`AI_InvalidToolArgumentsError`**: Parses the arguments, runs the repair pipeline, and returns the fixed tool call.
 - **`AI_NoSuchToolError`**: Resolves the tool name via fuzzy matching. In hybrid mode, reroutes listed/hidden task tools to the `task` meta-tool.
 - Returns `null` if repair fails (the AI SDK will surface the original error to the model).
+
+---
+
+## `ToolHarness` Methods Summary
+
+| Method | Returns | Description |
+|---|---|---|
+| `dispatch(category, input, context?)` | `Promise<unknown>` | Route a tool call by category |
+| `repair(toolName, args)` | `Promise<RepairResult>` | Run repair pipeline without executing |
+| `repairJSON(raw)` | `Record \| null` | Fix malformed JSON strings |
+| `generatePromptBlock(options?)` | `string` | Generate system prompt tool description block |
+| `getToolDetail(name)` | `string` | Detailed description of a single tool |
+| `listToolSummaries()` | `string` | One-line signatures for all tools |
+| `loadTools(defs)` | `void` | Register additional tools at runtime |
+| `unloadTools(names)` | `void` | Remove tools from the registry |
+| `registerCapability(cap)` | `void` | Register a capability for compiled tool surfaces |
+| `toCompiledTools(context, options?)` | `CompileResult` | Compile turn-local tool surface from capabilities |
+| `suggestToolChoice(context)` | `"auto" \| "required"` | Suggest `toolChoice` based on conversation structure |
+| `toMetaTools()` | `{ read, search, task }` | AI SDK tools consolidated by category |
+| `toDirectTools()` | `Record<string, Tool>` | AI SDK tools, one per registered tool |
+| `toHybridTools()` | `Record<string, Tool>` | Mix of direct and meta tools |
+| `repairHook(options?)` | `Function` | AI SDK `experimental_repairToolCall` hook |

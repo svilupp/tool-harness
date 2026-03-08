@@ -13,12 +13,16 @@ import type {
   ToolDefs,
   ToolExecutionContext,
   HarnessConfig,
+  RepairPolicy,
   RepairResult,
   RepairAction,
   StructuredToolError,
   FieldIssue,
   Visibility,
   Category,
+  TurnContext,
+  ActivationRule,
+  Capability,
 } from "tool-harness";
 ```
 
@@ -78,7 +82,7 @@ Defines a single tool.
 | `visibility` | `Visibility` | Yes | How this tool appears in meta-tool descriptions |
 | `schema` | `z.ZodObject` | Yes | Zod schema for input validation and repair |
 | `execute` | `Function` | Yes | The tool's implementation |
-| `examples` | `TInput[]` | No | Example inputs for the AI SDK's `inputExamples` |
+| `examples` | `TInput[]` | No | Example inputs for documentation generation. Not sent to the model. |
 | `priority` | `number` | No | Priority for ordering in descriptions |
 | `toModelOutput` | `Function` | No | Custom output formatter for `experimental_toModelOutput` |
 
@@ -116,6 +120,8 @@ Passed to tool `execute` functions with metadata about the current call.
 ```ts
 interface HarnessConfig {
   repairModel?: LanguageModel;
+  repairPolicy?: RepairPolicy;
+  onEvent?: (event: HarnessEvent) => void;
 }
 ```
 
@@ -124,6 +130,90 @@ Configuration for the `ToolHarness`.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `repairModel` | `LanguageModel` | No | AI model used for layer-6 AI repair. Any Vercel AI SDK `LanguageModel` works. |
+| `repairPolicy` | `RepairPolicy` | No | Controls when and how the repair pipeline runs. Defaults to `{ mode: "on_validation_failure" }`. |
+| `onEvent` | `Function` | No | Callback for harness lifecycle events (tool offered, repair triggered, execution result, etc.). |
+
+## RepairPolicy
+
+```ts
+interface RepairPolicy {
+  mode: "never" | "on_validation_failure" | "always";
+  enabledLayers?: RepairStrategy[];
+  confidenceThreshold?: number;
+}
+```
+
+Controls repair pipeline behavior.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | `string` | Yes | `"never"`: validate only, no repairs. `"on_validation_failure"` (default): validate first, only repair if invalid. `"always"`: run all repair layers unconditionally. |
+| `enabledLayers` | `RepairStrategy[]` | No | Subset of repair strategies to enable. When omitted, all layers are active. |
+| `confidenceThreshold` | `number` | No | Minimum confidence for fuzzy/semantic matches to be accepted. |
+
+---
+
+## TurnContext
+
+```ts
+interface TurnContext {
+  state: string;
+  activeHandles: string[];
+  turnNumber: number;
+  lastToolCalled: string | null;
+  provider?: string;
+}
+```
+
+Describes the current conversation turn. Used by `ActivationRule` conditions to decide which tools to surface.
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `string` | Current state machine state (e.g., `"idle"`, `"editing"`) |
+| `activeHandles` | `string[]` | Currently active resource handles |
+| `turnNumber` | `number` | Sequential turn counter |
+| `lastToolCalled` | `string \| null` | Name of the tool called in the previous turn, or `null` |
+| `provider` | `string` | Optional model provider identifier |
+
+---
+
+## ActivationRule
+
+```ts
+interface ActivationRule {
+  type: "state_match" | "handle_present" | "always" | "never";
+  condition: (ctx: TurnContext) => boolean;
+}
+```
+
+Determines whether a capability should be active on a given turn.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `string` | Rule kind: `"state_match"`, `"handle_present"`, `"always"`, or `"never"` |
+| `condition` | `Function` | Predicate evaluated against the current `TurnContext` |
+
+## Capability
+
+```ts
+interface Capability {
+  name: string;
+  domain: string;
+  group: string;
+  tool: ToolDef;
+  activationRules: ActivationRule[];
+}
+```
+
+Wraps a `ToolDef` with metadata for dynamic tool surfacing. The harness evaluates `activationRules` each turn and only offers capabilities whose rules pass.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Unique capability identifier |
+| `domain` | `string` | High-level domain (e.g., `"filesystem"`, `"git"`) |
+| `group` | `string` | Logical group within the domain |
+| `tool` | `ToolDef` | The underlying tool definition |
+| `activationRules` | `ActivationRule[]` | Rules that control when this capability is offered |
 
 ---
 
