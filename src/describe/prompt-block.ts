@@ -1,10 +1,35 @@
-import { generateObjectExample } from "../introspect.ts";
 import type { ToolDef } from "../types.ts";
 import { toolSignature } from "./signature.ts";
 
-const MAX_EXAMPLES = 3;
+export interface PromptBlockOptions {
+	style?:
+		| "minimal"
+		| "grouped"
+		| "grouped_with_breadth"
+		| "grouped_with_examples"
+		| "full";
+	maxEnumValues?: number;
+	domainGroups?: Record<string, string[]>;
+	breadthExamples?: Record<
+		string,
+		{ description: string; input: Record<string, unknown> }[]
+	>;
+}
 
 export function generatePromptBlock(
+	tools: Array<{ name: string; tool: ToolDef }>,
+	options?: PromptBlockOptions,
+): string {
+	const style = options?.style ?? "grouped_with_breadth";
+
+	if (style === "minimal") {
+		return generateMinimalBlock(tools);
+	}
+
+	return generateGroupedBlock(tools, options ?? {});
+}
+
+function generateMinimalBlock(
 	tools: Array<{ name: string; tool: ToolDef }>,
 ): string {
 	const always = tools.filter((t) => t.tool.visibility === "always");
@@ -37,116 +62,133 @@ export function generatePromptBlock(
 		);
 	}
 
-	// Few-shot examples section
-	const exampleLines = buildFewShotExamples([...always, ...listed]);
-	if (exampleLines.length > 0) {
-		lines.push("");
-		lines.push("## Example Tool Calls");
-		lines.push("");
-		lines.push(...exampleLines);
-	}
-
-	// Negative examples section (always shown)
+	// Action guidance section
 	lines.push("");
-	lines.push(...buildNegativeExamples());
+	lines.push(...buildActionGuidance());
 
 	return lines.join("\n");
 }
 
-interface FormattedExample {
-	user: string;
-	call: string;
-}
-
-function buildFewShotExamples(
+function generateGroupedBlock(
 	tools: Array<{ name: string; tool: ToolDef }>,
-): string[] {
-	const examples: FormattedExample[] = [];
+	options: PromptBlockOptions,
+): string {
+	const style = options.style ?? "grouped_with_breadth";
+	const lines: string[] = [];
+	lines.push("## Available Actions");
 
-	// Prioritize: tools with explicit examples first, then "always" visibility, then listed
-	const withExamples = tools.filter(
-		(t) => t.tool.examples && t.tool.examples.length > 0,
-	);
-	const withoutExamples = tools.filter(
-		(t) => !t.tool.examples || t.tool.examples.length === 0,
-	);
+	// Build groups: domainGroups if provided, otherwise by category
+	const groups = buildGroups(tools, options.domainGroups);
 
-	// Collect from explicit examples
-	for (const { name, tool } of withExamples) {
-		if (examples.length >= MAX_EXAMPLES) break;
-		for (const ex of tool.examples ?? []) {
-			if (examples.length >= MAX_EXAMPLES) break;
-			examples.push(formatToolExample(name, tool, ex));
+	for (const [groupLabel, groupTools] of groups) {
+		if (groupTools.length === 0) continue;
+
+		lines.push("");
+		lines.push(`### ${groupLabel}`);
+		lines.push(
+			`When the user wants to ${groupLabel.toLowerCase().replace(/&/g, "or")}:`,
+		);
+		for (const { name, tool } of groupTools) {
+			lines.push(`- ${toolSignature(name, tool)}`);
+		}
+
+		// Add breadth examples for grouped_with_examples and full styles
+		if (
+			(style === "grouped_with_examples" || style === "full") &&
+			options.breadthExamples
+		) {
+			const groupToolNames = new Set(groupTools.map((t) => t.name));
+			const matchingExamples: {
+				description: string;
+				input: Record<string, unknown>;
+			}[] = [];
+
+			for (const [family, examples] of Object.entries(
+				options.breadthExamples,
+			)) {
+				if (groupToolNames.has(family)) {
+					matchingExamples.push(...examples);
+				}
+			}
+
+			if (matchingExamples.length > 0) {
+				lines.push("");
+				lines.push("Usage patterns:");
+				for (const ex of matchingExamples) {
+					const argsStr = Object.entries(ex.input)
+						.map(([k, v]) =>
+							typeof v === "string" ? `${k}="${v}"` : `${k}=${v}`,
+						)
+						.join(", ");
+					// Find the tool name that matches this example
+					const toolName =
+						[...groupToolNames].find((n) =>
+							Object.keys(ex.input).some((k) => {
+								const t = groupTools.find((gt) => gt.name === n);
+								return t && Object.keys(t.tool.schema.shape).includes(k);
+							}),
+						) ??
+						groupTools[0]?.name ??
+						"tool";
+					lines.push(`- ${ex.description}: ${toolName}(${argsStr})`);
+				}
+			}
 		}
 	}
 
-	// Fill remaining slots with synthetic examples
-	for (const { name, tool } of withoutExamples) {
-		if (examples.length >= MAX_EXAMPLES) break;
-		const syntheticArgs = generateObjectExample(tool.schema);
-		examples.push(formatToolExample(name, tool, syntheticArgs));
-	}
+	// Action guidance section
+	lines.push("");
+	lines.push(...buildActionGuidance());
 
-	if (examples.length === 0) return [];
-
-	const lines: string[] = [];
-	let first = true;
-	for (const ex of examples) {
-		if (!first) lines.push("");
-		first = false;
-		lines.push(`User: "${ex.user}"`);
-		lines.push(ex.call);
-	}
-	return lines;
+	return lines.join("\n");
 }
 
-function formatToolExample(
-	name: string,
-	tool: ToolDef,
-	args: Record<string, unknown>,
-): FormattedExample {
-	const wrapper = tool.category;
-	const argsJson = JSON.stringify(args);
+function buildGroups(
+	tools: Array<{ name: string; tool: ToolDef }>,
+	domainGroups?: Record<string, string[]>,
+): Array<[string, Array<{ name: string; tool: ToolDef }>]> {
+	if (domainGroups) {
+		const result: Array<[string, Array<{ name: string; tool: ToolDef }>]> = [];
+		const toolMap = new Map(tools.map((t) => [t.name, t]));
+		const assigned = new Set<string>();
 
-	// Build a natural user prompt from the args
-	// Find the primary string arg (usually 'query', 'product_id', etc.)
-	const primaryArg = Object.entries(args).find(
-		([_, v]) => typeof v === "string",
-	);
-	const descFirstSentence = tool.description.split(".")[0] ?? tool.description;
-	const userPrompt = primaryArg
-		? `${descFirstSentence} — e.g. "${primaryArg[1]}"`
-		: descFirstSentence;
+		for (const [label, names] of Object.entries(domainGroups)) {
+			const groupTools: Array<{ name: string; tool: ToolDef }> = [];
+			for (const name of names) {
+				const t = toolMap.get(name);
+				if (t) {
+					groupTools.push(t);
+					assigned.add(name);
+				}
+			}
+			result.push([label, groupTools]);
+		}
 
-	let call: string;
-	if (wrapper === "task") {
-		call = `\u2192 task(name="${name}", args=${argsJson})`;
-	} else if (wrapper === "read") {
-		const { [Object.keys(args)[0] as string]: _firstVal, ...rest } = args;
-		const restJson = JSON.stringify(rest);
-		call = `\u2192 read(target="${name}"${restJson !== "{}" ? `, ${restJson.slice(1, -1)}` : ""})`;
-	} else {
-		// search
-		call = `\u2192 search(${argsJson.slice(1, -1)})`;
+		// Any unassigned tools go into "Other"
+		const unassigned = tools.filter((t) => !assigned.has(t.name));
+		if (unassigned.length > 0) {
+			result.push(["Other", unassigned]);
+		}
+
+		return result;
 	}
 
-	return { user: userPrompt, call };
+	// Group by category
+	const categoryMap = new Map<string, Array<{ name: string; tool: ToolDef }>>();
+	for (const t of tools) {
+		const cat = t.tool.category;
+		const label = cat.charAt(0).toUpperCase() + cat.slice(1);
+		if (!categoryMap.has(label)) categoryMap.set(label, []);
+		categoryMap.get(label)?.push(t);
+	}
+	return [...categoryMap.entries()];
 }
 
-function buildNegativeExamples(): string[] {
+function buildActionGuidance(): string[] {
 	return [
-		"## When NOT to Call Tools",
-		"- User is making conversation or thinking out loud \u2192 respond naturally",
-		"- User hasn't given enough specifics \u2192 ask clarifying questions first",
-		"- User is responding to your question \u2192 continue the conversation",
-		"",
-		'User: "That sounds interesting, tell me more"',
-		"\u2192 [no tool call \u2014 respond conversationally]",
-		"",
-		'User: "Hmm, I\'m not sure yet"',
-		"\u2192 [no tool call \u2014 ask what they need]",
-		"",
-		'User: "Add that to my cart" (after seeing search results)',
-		"\u2192 [call cart_add with the product ID from results \u2014 don't re-search]",
+		"## Action Guidance",
+		"- When the user requests an action, execute it immediately \u2014 do not ask for confirmation unless the action is irreversible.",
+		"- When the user confirms a previous suggestion, execute the corresponding tool call.",
+		"- Prefer calling a tool over asking clarifying questions when the intent is clear.",
 	];
 }

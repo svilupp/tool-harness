@@ -2,7 +2,7 @@ import { z } from "zod";
 import { type FieldInfo, getFields, unwrapSchema } from "../introspect.ts";
 import type { ToolDef } from "../types.ts";
 
-const MAX_ENUM_DISPLAY = 6;
+const MAX_ENUM_DISPLAY = 12;
 
 function formatParam(field: FieldInfo): string {
 	const isOptional = !field.required;
@@ -23,6 +23,24 @@ function formatParam(field: FieldInfo): string {
 			enumStr = enumVals.join("|");
 		}
 		result += `:${enumStr}`;
+	} else if (innerType instanceof z.ZodArray) {
+		const itemType = unwrapSchema((innerType as z.ZodArray<z.ZodType>).element);
+		if (itemType instanceof z.ZodNumber) {
+			result += ":num[]";
+		} else if (itemType instanceof z.ZodEnum) {
+			const vals = (itemType as unknown as { options: string[] }).options;
+			let enumStr: string;
+			if (vals.length > MAX_ENUM_DISPLAY) {
+				enumStr = `${vals.slice(0, 5).join("|")}|...`;
+			} else {
+				enumStr = vals.join("|");
+			}
+			result += `:enum[]|${enumStr}`;
+		} else {
+			result += ":str[]";
+		}
+	} else if (innerType instanceof z.ZodObject) {
+		result += ":object";
 	} else if (innerType instanceof z.ZodNumber) {
 		result += ":num";
 	} else if (innerType instanceof z.ZodBoolean) {

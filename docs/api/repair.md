@@ -7,6 +7,40 @@ title: Repair Pipeline
 
 tool-harness includes a 7-layer repair pipeline that automatically fixes malformed tool arguments before validation fails. Each layer addresses a different class of error, and layers run in sequence -- if an earlier layer fixes the issue, later layers see the corrected data.
 
+## Repair Policy
+
+The `repairPolicy` option on `HarnessConfig` controls when the pipeline runs:
+
+| Mode | Behavior |
+|---|---|
+| `"never"` | Validate only, no repairs. Useful when you want strict input enforcement. |
+| `"on_validation_failure"` | **(default)** Validate first; only run repair layers if validation fails. Valid inputs skip the repair pipeline entirely -- 0% overhead on correct calls. |
+| `"always"` | Run all repair layers unconditionally, even on valid inputs. Intended for research and debugging. |
+
+```ts
+const harness = createHarness(tools, {
+  repairPolicy: { mode: "on_validation_failure" },
+});
+```
+
+### `enabledLayers`
+
+Selectively enable or disable individual repair layers:
+
+```ts
+const harness = createHarness(tools, {
+  repairPolicy: {
+    mode: "on_validation_failure",
+    enabledLayers: ["json_fix", "key_normalize", "coerce", "fuzzy_enum"],
+    // synonym_enum, semantic_enum, default, ai_repair are disabled
+  },
+});
+```
+
+When `enabledLayers` is omitted, all layers are active.
+
+---
+
 ## Pipeline Overview
 
 ```
@@ -217,6 +251,13 @@ This structured error is returned as `RepairResult.error` and is designed to be 
 ## Using Repair Directly
 
 You can run the repair pipeline without executing the tool:
+
+```ts
+const result = await harness.repair("writeFile", args);
+// Uses default policy: on_validation_failure
+```
+
+With explicit arguments and inspection:
 
 ```ts
 const result = await harness.repair("writeFile", {

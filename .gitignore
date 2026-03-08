@@ -45,3 +45,4 @@ learning-tests/
 
 .DS_Store
 .env
+experiments/

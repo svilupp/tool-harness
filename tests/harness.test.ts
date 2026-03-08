@@ -177,12 +177,12 @@ describe("SDK integration", () => {
 		]);
 	});
 
-	test("direct tools with examples include inputExamples", () => {
+	test("direct tools with examples do not pass inputExamples to model", () => {
 		const harness = createHarness(tools);
 		const direct = harness.toDirectTools();
-		// send_email has examples, so inputExamples should be set
+		// examples field is kept on ToolDef for backward compat but not sent to the model
 		// biome-ignore lint/suspicious/noExplicitAny: accessing AI SDK internal property for testing
-		expect((direct["send_email"] as any).inputExamples).toBeDefined();
+		expect((direct["send_email"] as any).inputExamples).toBeUndefined();
 	});
 
 	test("repairHook returns a function", () => {
